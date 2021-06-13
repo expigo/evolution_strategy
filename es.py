@@ -1,3 +1,4 @@
+import numpy
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error, mean_absolute_error
@@ -5,7 +6,7 @@ import pathlib
 
 
 
-def es(obj, orig_data, mu_size=200, ratio=5, Nmax=200, eps=10e-5):
+def es(obj, orig_data, mu_size=200, phi=5, Nmax=200, eps=10e-5, comma=False):
     CHROMOSOME_SIZE = 6
     N_PROBLEM_PARAMS = 3
     N_ALG_PARAMS = 3
@@ -15,30 +16,49 @@ def es(obj, orig_data, mu_size=200, ratio=5, Nmax=200, eps=10e-5):
     sigmas = np.array([np.random.default_rng().uniform(low=0, high=10, size=(N_ALG_PARAMS,)) for _ in range(mu_size)])
     zero_mean_gauss = lambda x: np.random.normal(0, x)
 
-    epochs = []
+    curr_rmse = 10e-3
+    prev_rmse = 10e-3
     for epoch in range(Nmax):
         fitnesses = np.apply_along_axis(rmse, 1, parents_x).reshape(-1, 1)
         mu = np.hstack((parents_x, sigmas, fitnesses))
 
-        mutation_operand = np.vectorize(zero_mean_gauss)(sigmas)
-        offspring = parents_x + mutation_operand
+        # take parents 5 times
+        offspring = numpy.resize(mu, (mu_size * phi, CHROMOSOME_SIZE+1))
 
-        plus = np.vstack([parents_x, offspring])
-
-        plus_sorted = sorted(plus, key=lambda x: rmse(x))
-        parents_x = np.array(plus_sorted[:200])
-
+        tau1 = 1 / np.sqrt(2 * CHROMOSOME_SIZE)
+        tau2 = 1 / np.sqrt(2 * np.sqrt(CHROMOSOME_SIZE))
 
         # update sigmas
-        for i in range(mu_size):
-            tau1 = 1 / np.sqrt(2 * CHROMOSOME_SIZE)
-            tau2 = 1 / np.sqrt(2 * np.sqrt(CHROMOSOME_SIZE))
+        for i in range(mu_size * phi):
             r1 = np.random.default_rng().normal(0, tau1)
-            sigmas[i, :] = np.exp(np.random.default_rng().normal(0, tau2, 3) + r1)
+            # sigmas_offspring[i, :] = np.exp(np.random.default_rng().normal(0, tau2, 3) + r1)
+            offspring[i, 3:6] = offspring[i, 3:6] * np.exp(r1 + np.random.default_rng().normal(0, tau2, 3))
 
-        # parents_x = offspring
+        # calc offspring fitness
+        offspring[:, 6] = np.apply_along_axis(rmse, 1, offspring[:, :3])
 
-    return parents_x, mu, mutation_operand, parents_x, offspring
+        # offspring_mutated = of
+
+        plus = np.vstack([mu, offspring])
+
+        plus_sorted = np.array(sorted(plus, key=lambda x: x[6]))
+
+        mu = plus_sorted[:200, :]
+        curr_rmse = mu[0, 6]
+        print(f'epoch: {epoch} | RMSE: {curr_rmse}')
+
+        if np.abs(curr_rmse-prev_rmse) < eps:
+            break
+
+        prev_rmse = curr_rmse
+        mutation_operand = np.vectorize(zero_mean_gauss)(sigmas)
+        # mu[:, :3] = mu[:, :3] + mutation_operand
+        parents_x = mu[:, :3] + mutation_operand
+        sigmas = mu[:, 3:6]
+
+
+
+    return parents_x, mutation_operand, mu, offspring
 
 def calc_rmse(data):
     def fn(x):
@@ -59,18 +79,15 @@ if __name__ == "__main__":
     data = np.loadtxt(str(path_to_data))
 
     res = es(f, data)
-    mu = res[3]
+    mu = res[2]
 
     rmse = calc_rmse(data)
-    mu_sorted = sorted(mu, key=lambda x: rmse(x))
 
-    results2 = []
-    for i in range(len(mu_sorted)):
-        # print(*mu[i, :])
-        results2.append(rmse(*mu_sorted[i]))
+    mu_sorted = np.array(sorted(mu, key=lambda  x: x[6]))
+
 
     for i in range(5):
-        f_parametrized = f(*np.array(mu_sorted[i]))
+        f_parametrized = f(*np.array(mu_sorted[i, :3]))
         plt.plot(data[:, 0], f_parametrized(data[:, 0]), label=f'{i}')
         plt.plot(data[:, 0], data[:, 1], label="ground truth")
         plt.legend()
